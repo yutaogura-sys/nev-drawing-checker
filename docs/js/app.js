@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const state = {
     apiKey: '',
     apiKeyVerified: false,
+    selectedModel: 'gemini-2.5-flash',
     selectedType: null, // 'kiso' | 'mokutekichi'
     file: null,
   };
@@ -52,6 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
       state.apiKey = savedKey;
       state.apiKeyVerified = true;
       showApiKeyStatus('保存済み', 'success');
+      // 保存済みキーでモデル別接続状態も確認
+      verifyModels(savedKey);
     }
 
     bindEvents();
@@ -65,6 +68,13 @@ document.addEventListener('DOMContentLoaded', () => {
     els.toggleApiKey.addEventListener('click', toggleApiKeyVisibility);
     els.verifyApiKey.addEventListener('click', onVerifyApiKey);
     els.saveApiKey.addEventListener('change', onSaveApiKeyToggle);
+
+    // モデル選択
+    document.querySelectorAll('input[name="geminiModel"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        state.selectedModel = e.target.value;
+      });
+    });
 
     // タイプ選択
     els.btnKiso.addEventListener('click', () => selectType('kiso'));
@@ -134,6 +144,9 @@ document.addEventListener('DOMContentLoaded', () => {
     els.verifyApiKey.textContent = '確認中...';
     showApiKeyStatus('', '');
 
+    // 全モデルのステータスをリセット
+    clearModelStatuses();
+
     try {
       const ok = await DrawingChecker.verifyApiKey(key);
       if (ok) {
@@ -145,6 +158,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           localStorage.removeItem('nev_checker_apikey');
         }
+        // モデル別の接続テストを並列実行
+        verifyModels(key);
       } else {
         showApiKeyStatus('無効なキーです', 'error');
       }
@@ -155,6 +170,37 @@ document.addEventListener('DOMContentLoaded', () => {
       els.verifyApiKey.textContent = '接続テスト';
       updateCheckButton();
     }
+  }
+
+  function clearModelStatuses() {
+    DrawingChecker.MODELS.forEach(model => {
+      const el = document.getElementById('status-' + model.id);
+      if (el) { el.textContent = ''; el.className = 'model-status'; }
+    });
+  }
+
+  async function verifyModels(apiKey) {
+    // 各モデルに「確認中」を表示
+    DrawingChecker.MODELS.forEach(model => {
+      const el = document.getElementById('status-' + model.id);
+      if (el) { el.textContent = '確認中...'; el.className = 'model-status checking'; }
+    });
+
+    const results = await DrawingChecker.verifyAllModels(apiKey);
+
+    DrawingChecker.MODELS.forEach(model => {
+      const el = document.getElementById('status-' + model.id);
+      if (!el) return;
+      const r = results[model.id];
+      if (r && r.available) {
+        el.textContent = '✓ 利用可能';
+        el.className = 'model-status available';
+      } else {
+        el.textContent = '✗ 利用不可';
+        el.className = 'model-status unavailable';
+        el.title = r ? r.reason : '';
+      }
+    });
   }
 
   function showApiKeyStatus(text, type) {
@@ -267,7 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.loadingSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-      const result = await DrawingChecker.check(state.apiKey, state.file, state.selectedType);
+      const result = await DrawingChecker.check(state.apiKey, state.file, state.selectedType, state.selectedModel);
       lastResult = result;
       renderResult(result);
     } catch (e) {
@@ -306,7 +352,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // サマリー
     const typeLabel = state.selectedType === 'kiso' ? '基礎充電' : '目的地充電';
-    els.resultSummary.textContent = `${typeLabel} | ${result.analyzedPages}ページ解析`;
+    const modelInfo = DrawingChecker.MODELS.find(m => m.id === state.selectedModel);
+    const modelLabel = modelInfo ? modelInfo.name : state.selectedModel;
+    els.resultSummary.textContent = `${typeLabel} | ${modelLabel} | ${result.analyzedPages}ページ解析`;
 
     // カテゴリ別結果
     els.resultCategories.innerHTML = '';
