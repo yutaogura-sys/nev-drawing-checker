@@ -220,6 +220,55 @@ body {
   flex-wrap: wrap;
 }
 
+/* --- APIキー取得ガイド --- */
+.apikey-guide {
+  margin-bottom: 16px;
+}
+
+.guide-toggle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 8px 0;
+  list-style: none;
+}
+
+.guide-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.guide-toggle::before {
+  content: '\25B6';
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+  transition: transform var(--transition);
+}
+
+details[open] > .guide-toggle::before {
+  transform: rotate(90deg);
+}
+
+.guide-steps {
+  margin: 10px 0 8px 20px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--gray-700);
+}
+
+.guide-steps a {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.guide-note {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-left: 4px;
+}
+
 /* --- モデル選択 --- */
 .model-selector {
   margin-bottom: 14px;
