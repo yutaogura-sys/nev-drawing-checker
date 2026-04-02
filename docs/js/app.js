@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.apiKeyInput.addEventListener('input', onApiKeyInput);
     els.toggleApiKey.addEventListener('click', toggleApiKeyVisibility);
     els.verifyApiKey.addEventListener('click', onVerifyApiKey);
+    els.saveApiKey.addEventListener('change', onSaveApiKeyToggle);
 
     // タイプ選択
     els.btnKiso.addEventListener('click', () => selectType('kiso'));
@@ -86,8 +87,12 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       els.uploadArea.classList.remove('drag-over');
       const files = e.dataTransfer.files;
-      if (files.length > 0 && files[0].type === 'application/pdf') {
-        handleFile(files[0]);
+      if (files.length > 0) {
+        if (files[0].type === 'application/pdf') {
+          handleFile(files[0]);
+        } else {
+          alert('PDF ファイルのみ対応しています。\nドロップされたファイル: ' + files[0].name);
+        }
       }
     });
 
@@ -155,6 +160,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function showApiKeyStatus(text, type) {
     els.apiKeyStatus.textContent = text;
     els.apiKeyStatus.className = 'status-badge' + (type ? ' ' + type : '');
+  }
+
+  function onSaveApiKeyToggle() {
+    if (!els.saveApiKey.checked) {
+      localStorage.removeItem('nev_checker_apikey');
+    } else if (state.apiKey) {
+      localStorage.setItem('nev_checker_apikey', state.apiKey);
+    }
   }
 
   // ─── タイプ選択 ───────────────────────────────
@@ -233,13 +246,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── チェック実行 ─────────────────────────────
   let lastResult = null;
+  let isChecking = false;
+
+  function setCheckingState(checking) {
+    isChecking = checking;
+    els.checkBtn.disabled = checking;
+    // チェック中はタイプ変更・ファイル操作を無効化
+    els.btnKiso.disabled = checking;
+    els.btnMokutekichi.disabled = checking;
+    if (els.removeFile) els.removeFile.disabled = checking;
+  }
 
   async function runCheck() {
-    els.checkBtn.disabled = true;
+    if (isChecking) return; // 二重実行防止
+    setCheckingState(true);
     els.resultSection.style.display = 'none';
     els.loadingSection.style.display = '';
 
-    // 結果セクションまでスクロール
+    // ローディングセクションまでスクロール
     els.loadingSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
@@ -248,15 +272,15 @@ document.addEventListener('DOMContentLoaded', () => {
       renderResult(result);
     } catch (e) {
       els.loadingSection.style.display = 'none';
-      alert('チェック中にエラーが発生しました:\n' + e.message);
-      els.checkBtn.disabled = false;
+      setCheckingState(false);
+      alert('チェック中にエラーが発生しました:\n\n' + e.message);
       return;
     }
 
     els.loadingSection.style.display = 'none';
     els.resultSection.style.display = '';
     els.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    els.checkBtn.disabled = false;
+    setCheckingState(false);
   }
 
   // ─── 結果描画 ─────────────────────────────────
