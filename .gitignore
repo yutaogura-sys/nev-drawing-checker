@@ -1,0 +1,16 @@
+# 素材フォルダ（正解事例PDF等は公開しない）
+素材/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Node
+node_modules/

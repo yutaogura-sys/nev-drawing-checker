@@ -1,0 +1,392 @@
+/* ============================================================
+   app.js — メインアプリケーションロジック
+   ============================================================ */
+
+document.addEventListener('DOMContentLoaded', () => {
+
+  // ─── 状態管理 ─────────────────────────────────
+  const state = {
+    apiKey: '',
+    apiKeyVerified: false,
+    selectedType: null, // 'kiso' | 'mokutekichi'
+    file: null,
+  };
+
+  // ─── DOM要素 ──────────────────────────────────
+  const $ = id => document.getElementById(id);
+
+  const els = {
+    apiKeyInput:    $('apiKeyInput'),
+    toggleApiKey:   $('toggleApiKey'),
+    saveApiKey:     $('saveApiKey'),
+    verifyApiKey:   $('verifyApiKey'),
+    apiKeyStatus:   $('apiKeyStatus'),
+    btnKiso:        $('btnKiso'),
+    btnMokutekichi: $('btnMokutekichi'),
+    uploadArea:     $('uploadArea'),
+    fileInput:      $('fileInput'),
+    fileInfo:       $('fileInfo'),
+    fileName:       $('fileName'),
+    fileSize:       $('fileSize'),
+    removeFile:     $('removeFile'),
+    previewContainer: $('previewContainer'),
+    checkBtn:       $('checkBtn'),
+    checkNote:      $('checkNote'),
+    loadingSection: $('loadingSection'),
+    resultSection:  $('resultSection'),
+    resultSummary:  $('resultSummary'),
+    overallResult:  $('overallResult'),
+    resultCategories: $('resultCategories'),
+    aiComment:      $('aiComment'),
+    exportBtn:      $('exportBtn'),
+    recheckBtn:     $('recheckBtn'),
+  };
+
+  // ─── 初期化 ───────────────────────────────────
+  function init() {
+    // 保存済みAPIキーの読み込み
+    const savedKey = localStorage.getItem('nev_checker_apikey');
+    if (savedKey) {
+      els.apiKeyInput.value = savedKey;
+      els.saveApiKey.checked = true;
+      state.apiKey = savedKey;
+      state.apiKeyVerified = true;
+      showApiKeyStatus('保存済み', 'success');
+    }
+
+    bindEvents();
+    updateCheckButton();
+  }
+
+  // ─── イベントバインド ─────────────────────────
+  function bindEvents() {
+    // API キー関連
+    els.apiKeyInput.addEventListener('input', onApiKeyInput);
+    els.toggleApiKey.addEventListener('click', toggleApiKeyVisibility);
+    els.verifyApiKey.addEventListener('click', onVerifyApiKey);
+
+    // タイプ選択
+    els.btnKiso.addEventListener('click', () => selectType('kiso'));
+    els.btnMokutekichi.addEventListener('click', () => selectType('mokutekichi'));
+
+    // ファイルアップロード
+    els.uploadArea.addEventListener('click', () => els.fileInput.click());
+    els.fileInput.addEventListener('change', onFileSelect);
+    els.removeFile.addEventListener('click', removeFile);
+
+    // ドラッグ＆ドロップ
+    els.uploadArea.addEventListener('dragover', e => {
+      e.preventDefault();
+      els.uploadArea.classList.add('drag-over');
+    });
+    els.uploadArea.addEventListener('dragleave', () => {
+      els.uploadArea.classList.remove('drag-over');
+    });
+    els.uploadArea.addEventListener('drop', e => {
+      e.preventDefault();
+      els.uploadArea.classList.remove('drag-over');
+      const files = e.dataTransfer.files;
+      if (files.length > 0 && files[0].type === 'application/pdf') {
+        handleFile(files[0]);
+      }
+    });
+
+    // チェック実行
+    els.checkBtn.addEventListener('click', runCheck);
+
+    // 結果アクション
+    els.exportBtn.addEventListener('click', exportResult);
+    els.recheckBtn.addEventListener('click', resetForRecheck);
+  }
+
+  // ─── API キー ─────────────────────────────────
+  function onApiKeyInput() {
+    state.apiKey = els.apiKeyInput.value.trim();
+    state.apiKeyVerified = false;
+    showApiKeyStatus('', '');
+    updateCheckButton();
+  }
+
+  function toggleApiKeyVisibility() {
+    const input = els.apiKeyInput;
+    if (input.type === 'password') {
+      input.type = 'text';
+      els.toggleApiKey.innerHTML = '<span class="eye-icon">&#128064;</span>';
+    } else {
+      input.type = 'password';
+      els.toggleApiKey.innerHTML = '<span class="eye-icon">&#128065;</span>';
+    }
+  }
+
+  async function onVerifyApiKey() {
+    const key = els.apiKeyInput.value.trim();
+    if (!key) {
+      showApiKeyStatus('キーを入力してください', 'error');
+      return;
+    }
+
+    els.verifyApiKey.disabled = true;
+    els.verifyApiKey.textContent = '確認中...';
+    showApiKeyStatus('', '');
+
+    try {
+      const ok = await DrawingChecker.verifyApiKey(key);
+      if (ok) {
+        state.apiKey = key;
+        state.apiKeyVerified = true;
+        showApiKeyStatus('接続OK', 'success');
+        if (els.saveApiKey.checked) {
+          localStorage.setItem('nev_checker_apikey', key);
+        } else {
+          localStorage.removeItem('nev_checker_apikey');
+        }
+      } else {
+        showApiKeyStatus('無効なキーです', 'error');
+      }
+    } catch (e) {
+      showApiKeyStatus('接続エラー', 'error');
+    } finally {
+      els.verifyApiKey.disabled = false;
+      els.verifyApiKey.textContent = '接続テスト';
+      updateCheckButton();
+    }
+  }
+
+  function showApiKeyStatus(text, type) {
+    els.apiKeyStatus.textContent = text;
+    els.apiKeyStatus.className = 'status-badge' + (type ? ' ' + type : '');
+  }
+
+  // ─── タイプ選択 ───────────────────────────────
+  function selectType(type) {
+    state.selectedType = type;
+    els.btnKiso.classList.toggle('selected', type === 'kiso');
+    els.btnMokutekichi.classList.toggle('selected', type === 'mokutekichi');
+    updateCheckButton();
+  }
+
+  // ─── ファイル処理 ─────────────────────────────
+  function onFileSelect(e) {
+    if (e.target.files.length > 0) {
+      handleFile(e.target.files[0]);
+    }
+  }
+
+  async function handleFile(file) {
+    if (file.type !== 'application/pdf') {
+      alert('PDF ファイルを選択してください。');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      alert('ファイルサイズが20MBを超えています。');
+      return;
+    }
+
+    state.file = file;
+    els.fileName.textContent = file.name;
+    els.fileSize.textContent = formatFileSize(file.size);
+    els.uploadArea.style.display = 'none';
+    els.fileInfo.style.display = 'block';
+
+    // プレビュー生成
+    els.previewContainer.innerHTML = '';
+    try {
+      const canvas = await DrawingChecker.pdfToPreview(file);
+      els.previewContainer.appendChild(canvas);
+    } catch (e) {
+      els.previewContainer.innerHTML = '<p style="color:#9ca3af;font-size:13px;">プレビューを生成できませんでした</p>';
+    }
+
+    updateCheckButton();
+  }
+
+  function removeFile() {
+    state.file = null;
+    els.fileInput.value = '';
+    els.uploadArea.style.display = '';
+    els.fileInfo.style.display = 'none';
+    els.previewContainer.innerHTML = '';
+    updateCheckButton();
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  // ─── チェックボタン制御 ───────────────────────
+  function updateCheckButton() {
+    const ready = state.apiKey && state.selectedType && state.file;
+    els.checkBtn.disabled = !ready;
+
+    if (!state.apiKey) {
+      els.checkNote.textContent = 'Gemini API キーを入力してください';
+    } else if (!state.selectedType) {
+      els.checkNote.textContent = '図面タイプ（基礎充電 / 目的地充電）を選択してください';
+    } else if (!state.file) {
+      els.checkNote.textContent = 'チェック対象の PDF ファイルをアップロードしてください';
+    } else {
+      els.checkNote.textContent = '準備完了 — チェックを実行できます';
+    }
+  }
+
+  // ─── チェック実行 ─────────────────────────────
+  let lastResult = null;
+
+  async function runCheck() {
+    els.checkBtn.disabled = true;
+    els.resultSection.style.display = 'none';
+    els.loadingSection.style.display = '';
+
+    // 結果セクションまでスクロール
+    els.loadingSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    try {
+      const result = await DrawingChecker.check(state.apiKey, state.file, state.selectedType);
+      lastResult = result;
+      renderResult(result);
+    } catch (e) {
+      els.loadingSection.style.display = 'none';
+      alert('チェック中にエラーが発生しました:\n' + e.message);
+      els.checkBtn.disabled = false;
+      return;
+    }
+
+    els.loadingSection.style.display = 'none';
+    els.resultSection.style.display = '';
+    els.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    els.checkBtn.disabled = false;
+  }
+
+  // ─── 結果描画 ─────────────────────────────────
+  function renderResult(result) {
+    // 総合判定
+    const overallLabels = {
+      pass: { icon: '&#9989;', text: '合格', desc: '全ての必須要件を満たしています' },
+      warn: { icon: '&#9888;&#65039;', text: '要確認', desc: '一部の必須要件に不備の可能性があります' },
+      fail: { icon: '&#10060;', text: '不合格', desc: '複数の必須要件が満たされていません' },
+    };
+    const ov = overallLabels[result.overall];
+
+    els.overallResult.className = 'overall-result ' + result.overall;
+    els.overallResult.innerHTML = `
+      <span class="overall-icon">${ov.icon}</span>
+      <div class="overall-label">${ov.text}</div>
+      <div class="overall-score">
+        合格 ${result.totalPass} / ${result.totalItems} 項目
+        （必須: ${result.requiredPass} / ${result.requiredTotal}）
+      </div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${ov.desc}</div>
+    `;
+
+    // サマリー
+    const typeLabel = state.selectedType === 'kiso' ? '基礎充電' : '目的地充電';
+    els.resultSummary.textContent = `${typeLabel} | ${result.analyzedPages}ページ解析`;
+
+    // カテゴリ別結果
+    els.resultCategories.innerHTML = '';
+    const categories = DrawingChecker.CATEGORIES;
+
+    // カテゴリ順にソート
+    const sortedCats = Object.keys(result.categoryResults).sort((a, b) => {
+      return (categories[a]?.order || 99) - (categories[b]?.order || 99);
+    });
+
+    sortedCats.forEach(catKey => {
+      const catData = result.categoryResults[catKey];
+      const catMeta = categories[catKey] || { title: catKey, icon: '&#128203;' };
+
+      let badgeClass, badgeText;
+      if (catData.fail === 0 && catData.warn === 0) {
+        badgeClass = 'pass'; badgeText = '全て合格';
+      } else if (catData.fail === 0) {
+        badgeClass = 'warn'; badgeText = `${catData.warn}件 要確認`;
+      } else {
+        badgeClass = 'fail'; badgeText = `${catData.fail}件 不合格`;
+      }
+
+      const catEl = document.createElement('div');
+      catEl.className = 'result-category';
+      catEl.innerHTML = `
+        <div class="category-header">
+          <span class="category-icon">${catMeta.icon}</span>
+          <span class="category-title">${catMeta.title}</span>
+          <span class="category-badge ${badgeClass}">${badgeText}</span>
+        </div>
+        <ul class="category-items">
+          ${catData.items.map(item => renderCheckItem(item)).join('')}
+        </ul>
+      `;
+      els.resultCategories.appendChild(catEl);
+    });
+
+    // AIコメント
+    els.aiComment.textContent = result.overallComment || '（コメントなし）';
+  }
+
+  function renderCheckItem(item) {
+    const icons = { pass: '&#10003;', fail: '&#10007;', warn: '!' };
+    const statusLabels = { pass: '合格', fail: '不合格', warn: '要確認' };
+    const requiredBadge = item.required ? '' : '<span style="font-size:11px;color:var(--gray-400);margin-left:4px;">[任意]</span>';
+
+    let detailHtml = '';
+    if (item.found_text) {
+      const detailClass = item.status === 'pass' ? 'found' : item.status === 'fail' ? 'not-found' : '';
+      detailHtml += `<div class="check-detail ${detailClass}">検出: ${escapeHtml(item.found_text)}</div>`;
+    }
+    if (item.detail) {
+      detailHtml += `<div class="check-detail">${escapeHtml(item.detail)}</div>`;
+    }
+
+    return `
+      <li class="check-item">
+        <span class="check-icon ${item.status}" title="${statusLabels[item.status]}">${icons[item.status]}</span>
+        <div class="check-content">
+          <div class="check-label">${escapeHtml(item.label)}${requiredBadge}</div>
+          ${detailHtml}
+        </div>
+      </li>
+    `;
+  }
+
+  // ─── ユーティリティ ───────────────────────────
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ─── 結果エクスポート ─────────────────────────
+  function exportResult() {
+    if (!lastResult) return;
+    const text = DrawingChecker.resultToText(lastResult, state.selectedType);
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = els.exportBtn.textContent;
+      els.exportBtn.textContent = 'コピーしました!';
+      setTimeout(() => { els.exportBtn.innerHTML = '&#128196; 結果をコピー'; }, 2000);
+    }).catch(() => {
+      // フォールバック
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      els.exportBtn.textContent = 'コピーしました!';
+      setTimeout(() => { els.exportBtn.innerHTML = '&#128196; 結果をコピー'; }, 2000);
+    });
+  }
+
+  // ─── 再チェック ───────────────────────────────
+  function resetForRecheck() {
+    lastResult = null;
+    els.resultSection.style.display = 'none';
+    removeFile();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ─── 起動 ─────────────────────────────────────
+  init();
+
+});
