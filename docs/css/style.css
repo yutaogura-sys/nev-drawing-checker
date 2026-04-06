@@ -456,6 +456,17 @@ details[open] > .guide-toggle::before {
   background: var(--gray-200);
 }
 
+.btn-success {
+  background: var(--success);
+  color: #fff;
+  border: 1px solid var(--success);
+}
+
+.btn-success:hover {
+  background: #0b7f74;
+  border-color: #0b7f74;
+}
+
 .btn-sm {
   padding: 6px 14px;
   font-size: 12px;

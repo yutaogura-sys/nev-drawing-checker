@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultCategories: $('resultCategories'),
     aiComment:      $('aiComment'),
     exportBtn:      $('exportBtn'),
+    exportExcelBtn: $('exportExcelBtn'),
     recheckBtn:     $('recheckBtn'),
   };
 
@@ -111,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 結果アクション
     els.exportBtn.addEventListener('click', exportResult);
+    els.exportExcelBtn.addEventListener('click', exportExcel);
     els.recheckBtn.addEventListener('click', resetForRecheck);
   }
 
@@ -448,6 +450,96 @@ document.addEventListener('DOMContentLoaded', () => {
       els.exportBtn.textContent = 'コピーしました!';
       setTimeout(() => { els.exportBtn.innerHTML = '&#128196; 結果をコピー'; }, 2000);
     });
+  }
+
+  // ─── Excel エクスポート ────────────────────────
+  function exportExcel() {
+    if (!lastResult) return;
+
+    const typeLabel = state.selectedType === 'kiso' ? '基礎充電' : '目的地充電';
+    const modelInfo = DrawingChecker.MODELS.find(m => m.id === state.selectedModel);
+    const modelLabel = modelInfo ? modelInfo.name : state.selectedModel;
+    const overallLabel = lastResult.overall === 'pass' ? '合格' : lastResult.overall === 'warn' ? '要確認' : '不合格';
+    const categories = DrawingChecker.CATEGORIES;
+
+    // --- シート1: 判定結果一覧 ---
+    const headerRows = [
+      ['NeV 設置場所見取図 要件判定結果'],
+      [],
+      ['図面タイプ', typeLabel, '', '使用モデル', modelLabel],
+      ['総合判定', overallLabel, '', '解析ページ数', lastResult.analyzedPages],
+      ['合格項目', `${lastResult.totalPass} / ${lastResult.totalItems}`, '', '必須項目', `${lastResult.requiredPass} / ${lastResult.requiredTotal}`],
+      [],
+      ['カテゴリ', '項目名', '必須/任意', '判定', '検出内容', '詳細'],
+    ];
+
+    const dataRows = lastResult.items.map(item => {
+      const catMeta = categories[item.category] || { title: item.category };
+      const statusLabel = item.status === 'pass' ? '合格' : item.status === 'fail' ? '不合格' : '要確認';
+      return [
+        catMeta.title.replace(/^[①-⑨]/, ''),
+        item.label,
+        item.required ? '必須' : '任意',
+        statusLabel,
+        item.found_text || '',
+        item.detail || '',
+      ];
+    });
+
+    const commentRows = [
+      [],
+      ['AI 総合コメント'],
+      [lastResult.overallComment || ''],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...dataRows, ...commentRows]);
+
+    // 列幅を設定
+    ws['!cols'] = [
+      { wch: 28 }, // カテゴリ
+      { wch: 26 }, // 項目名
+      { wch: 8 },  // 必須/任意
+      { wch: 8 },  // 判定
+      { wch: 40 }, // 検出内容
+      { wch: 50 }, // 詳細
+    ];
+
+    // セル結合（タイトル行）
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '判定結果');
+
+    // --- シート2: 読み取り情報 ---
+    if (lastResult.detectedInfo) {
+      const info = lastResult.detectedInfo;
+      const infoData = [
+        ['AI が読み取った情報'],
+        [],
+        ['項目', '読み取り内容'],
+        ['施設名称', info.facility_name || ''],
+        ['図面名称', info.drawing_title || ''],
+        ['作成者', info.creator || ''],
+        ['縮尺', info.scale || ''],
+        ['作成日', info.creation_date || ''],
+        ['公道情報', info.road_info || ''],
+        ['出入口の数', info.entrance_count || ''],
+        ['充電スペース情報', info.charging_space_info || ''],
+        ['案内板情報', info.signboard_info || ''],
+      ];
+      const ws2 = XLSX.utils.aoa_to_sheet(infoData);
+      ws2['!cols'] = [{ wch: 20 }, { wch: 60 }];
+      ws2['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+      XLSX.utils.book_append_sheet(wb, ws2, '読み取り情報');
+    }
+
+    // ダウンロード
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+    const fileName = `NeV見取図チェック結果_${typeLabel}_${dateStr}.xlsx`;
+    XLSX.writeFile(wb, fileName);
   }
 
   // ─── 再チェック ───────────────────────────────
