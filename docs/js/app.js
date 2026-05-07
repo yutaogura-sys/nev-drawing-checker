@@ -58,6 +58,16 @@ document.addEventListener('DOMContentLoaded', () => {
       verifyModels(savedKey);
     }
 
+    // 保存済みモデル選択の復元
+    const savedModel = localStorage.getItem('nev_checker_model');
+    if (savedModel) {
+      const radio = document.querySelector(`input[name="geminiModel"][value="${savedModel}"]`);
+      if (radio) {
+        radio.checked = true;
+        state.selectedModel = savedModel;
+      }
+    }
+
     bindEvents();
     updateCheckButton();
   }
@@ -74,6 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('input[name="geminiModel"]').forEach(radio => {
       radio.addEventListener('change', (e) => {
         state.selectedModel = e.target.value;
+        localStorage.setItem('nev_checker_model', e.target.value);
       });
     });
 
@@ -121,6 +132,16 @@ document.addEventListener('DOMContentLoaded', () => {
     state.apiKey = els.apiKeyInput.value.trim();
     state.apiKeyVerified = false;
     showApiKeyStatus('', '');
+
+    // 「保存する」がONなら入力時にもlocalStorageを同期
+    if (els.saveApiKey.checked) {
+      if (state.apiKey) {
+        localStorage.setItem('nev_checker_apikey', state.apiKey);
+      } else {
+        localStorage.removeItem('nev_checker_apikey');
+      }
+    }
+
     updateCheckButton();
   }
 
@@ -515,6 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- シート2: 読み取り情報 ---
     if (lastResult.detectedInfo) {
       const info = lastResult.detectedInfo;
+      const isMokutekichi = state.selectedType === 'mokutekichi';
       const infoData = [
         ['AI が読み取った情報'],
         [],
@@ -524,10 +546,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ['作成者', info.creator || ''],
         ['縮尺', info.scale || ''],
         ['作成日', info.creation_date || ''],
-        ['公道情報', info.road_info || ''],
+        // 目的地充電のみ公道情報を含める（基礎充電では非対象）
+        ...(isMokutekichi ? [['公道情報', info.road_info || '']] : []),
         ['出入口の数', info.entrance_count || ''],
         ['充電スペース情報', info.charging_space_info || ''],
-        ['案内板情報', info.signboard_info || ''],
+        // 案内板情報も目的地充電のみ
+        ...(isMokutekichi ? [['案内板情報', info.signboard_info || '']] : []),
       ];
       const ws2 = XLSX.utils.aoa_to_sheet(infoData);
       ws2['!cols'] = [{ wch: 20 }, { wch: 60 }];
